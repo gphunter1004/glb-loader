@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB 본 제어 슬라이더</title>
+    <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div id="scene-container"></div>
+        <div id="control-panel">
+            <div id="panel-resize-handle"></div>
+            <h2>GLB 본 제어 패널</h2>
+            
+            <div class="dropzone" id="dropzone">
+                <p>GLB 파일을 여기에 드래그 앤 드롭하거나</p>
+                <input type="file" id="file-input" accept=".glb,.gltf">
+            </div>
+            
+            <div id="bone-controls"></div>
+        </div>
+    </div>
+    
+    <div id="loading-message" style="display: none;">
+        <p>로딩 중...</p>
+    </div>
+    
+    <!-- importmap으로 Three.js 모듈과 로컬 모듈 로드 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.skypack.dev/three@0.136.0",
+                "three/addons/": "https://cdn.skypack.dev/three@0.136.0/examples/jsm/",
+                "sceneManager": "./js/sceneManager.js",
+                "boneController": "./js/boneController.js",
+                "uiManager": "./js/uiManager.js",
+                "glbLoader": "./js/glbLoader.js"
+            }
+        }
+    </script>
+    
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
