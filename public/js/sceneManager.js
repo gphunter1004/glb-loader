@@ -1,6 +1,7 @@
 // sceneManager.js - Three.js 장면 관리
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
 export class SceneManager {
     constructor() {
         this.scene = new THREE.Scene();
@@ -18,13 +19,9 @@ export class SceneManager {
         this.mixer = null;
         this.currentModel = null;
         this.highlightedBone = null;
-        this.highlightedMaterial = new THREE.MeshStandardMaterial({
-            color: 0x4285f4,
-            emissive: 0x4285f4,
-            emissiveIntensity: 0.5,
-            transparent: true,
-            opacity: 0.8
-        });
+        this.boneHelper = null;
+        this.boneAxisHelper = null;
+        this.boneSphere = null;
         this.originalMaterials = new Map();
         
         // 디버깅 정보
@@ -98,6 +95,34 @@ export class SceneManager {
         this.controls.target.copy(center);
         
         this.scene.add(model);
+        
+        // 디버깅
+        console.log('모델 추가됨:', model);
+        this.printModelStructure(model);
+    }
+    
+    printModelStructure(object, indent = 0) {
+        if (!this.debugMode) return;
+        
+        const indentStr = ' '.repeat(indent * 2);
+        let type = 'Object3D';
+        
+        if (object.isMesh) type = 'Mesh';
+        if (object.isBone) type = 'Bone';
+        if (object.isLight) type = 'Light';
+        if (object.isCamera) type = 'Camera';
+        
+        console.log(`${indentStr}${object.name || 'unnamed'} [${type}] uuid: ${object.uuid}`);
+        
+        if (object.children) {
+            object.children.forEach(child => {
+                this.printModelStructure(child, indent + 1);
+            });
+        }
+    }
+    
+    getCurrentModel() {
+        return this.currentModel;
     }
     
     highlightBone(bones, boneUuid) {
@@ -106,113 +131,172 @@ export class SceneManager {
             this.resetBoneHighlight();
         }
         
+        console.log(`본 강조 시도: ${boneUuid}`);
+        
         // 활성화된 본 찾기
         const activeBone = bones.find(bone => bone.uuid === boneUuid);
-        if (!activeBone) return;
-        
-        this.highlightedBone = activeBone;
-        
-        // 본 자체에 대한 시각적 표현 추가
-        const boneVisualizer = new THREE.BoxHelper(activeBone, 0x4285f4);
-        activeBone.add(boneVisualizer);
-        activeBone.userData.visualizer = boneVisualizer;
-        
-        // 본과 관련된 메시 찾기
-        const relatedMeshes = [];
-        this.findRelatedMeshes(activeBone, relatedMeshes);
-        
-        // 관련 메시가 없는 경우, 자식 본까지 재귀적으로 검색
-        if (relatedMeshes.length === 0) {
-            this.findChildBonesAndMeshes(activeBone, relatedMeshes);
+        if (!activeBone) {
+            console.warn(`지정된 UUID에 해당하는 본을 찾을 수 없음: ${boneUuid}`);
+            console.log('사용 가능한 본 UUID:');
+            bones.forEach(b => console.log(`${b.name}: ${b.uuid}`));
+            return;
         }
         
-        // 찾아낸 메시의 재질 변경
-        relatedMeshes.forEach(mesh => {
-            if (mesh.isMesh && mesh.material) {
-                // 원본 재질 저장
-                this.originalMaterials.set(mesh.uuid, mesh.material.clone());
-                
-                // 새 강조 재질 생성
-                const highlightMat = new THREE.MeshStandardMaterial({
-                    color: 0x4285f4,
-                    emissive: 0x4285f4,
-                    emissiveIntensity: 0.5,
-                    transparent: true,
-                    opacity: 0.8
-                });
-                
-                // 재질 적용
-                mesh.material = highlightMat;
-                mesh.material.needsUpdate = true;
-            }
-        });
+        console.log(`본 찾음: ${activeBone.name}, UUID: ${activeBone.uuid}`);
+        this.highlightedBone = activeBone;
         
-        // 디버깅 메시지
-        console.log(`본 강조: ${activeBone.name}, 관련 메시: ${relatedMeshes.length}개`);
+        // 본에 BoxHelper 추가 (시각적으로 본 위치 표시)
+        const boneHelper = new THREE.BoxHelper(activeBone, 0xff0000);
+        this.scene.add(boneHelper);
+        this.boneHelper = boneHelper;
+        
+        // !!중요!! - 이제 메시 색상은 변경하지 않고 대신 본 자체만 강조
+        
+        // 본 자체를 시각적으로 강조
+        const boneViz = new THREE.AxesHelper(0.1);  // 크기 증가
+        activeBone.add(boneViz);
+        this.boneAxisHelper = boneViz;
+        
+        // 본을 둘러싸는 반투명한 구체 추가
+        const sphereGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+        const sphereMaterial = new THREE.MeshBasicMaterial({
+            color: 0x4285f4,
+            transparent: true,
+            opacity: 0.5
+        });
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        activeBone.add(sphere);
+        this.boneSphere = sphere;
+        
+        console.log(`본 강조 표시 완료: ${activeBone.name}`);
     }
     
-    findRelatedMeshes(bone, meshes) {
-        // 본의 직계 자식 중 메시 찾기
+    // 본과 연결된 메시 찾기
+    findBoneLinkedMeshes(bone) {
+        const linkedMeshes = [];
+        
+        // 1. 본의 직계 자식 중 메시만 찾기 (첫 번째 레벨만)
         if (bone.children) {
             bone.children.forEach(child => {
-                if (child.isMesh && child.material) {
-                    meshes.push(child);
+                if ((child.isMesh || child.isSkinnedMesh)) {
+                    linkedMeshes.push(child);
+                    console.log(`본 ${bone.name}의 직접 자식 메시 발견: ${child.name}`);
                 }
             });
         }
         
-        // 본의 형제 메시 찾기 (같은 부모를 가진 메시)
-        if (bone.parent && bone.parent.children) {
-            bone.parent.children.forEach(sibling => {
-                if (sibling.isMesh && sibling.material) {
-                    // 이 메시가 본과 관련 있는지 확인 (이름으로 유추)
-                    if (sibling.name.includes(bone.name) || bone.name.includes(sibling.name)) {
-                        meshes.push(sibling);
+        // 2. 스키닝 메시에서 이 본을 직접 사용하는 경우만 (영향도 체크)
+        if (this.currentModel) {
+            this.currentModel.traverse(obj => {
+                if (obj.isSkinnedMesh && obj.skeleton) {
+                    // 이 스키닝 메시가 이 본을 사용하는지 확인
+                    const boneIndex = obj.skeleton.bones.findIndex(b => b.uuid === bone.uuid);
+                    if (boneIndex >= 0) {
+                        // 영향도 체크 (가능하다면)
+                        if (obj.skeleton.boneInverses && obj.skeleton.boneInverses[boneIndex]) {
+                            linkedMeshes.push(obj);
+                            console.log(`본 ${bone.name}을 사용하는 스키닝 메시 발견: ${obj.name}`);
+                        }
                     }
                 }
             });
         }
+        
+        // 결과 중복 제거
+        return [...new Set(linkedMeshes)];
     }
     
-    findChildBonesAndMeshes(bone, meshes) {
-        // 이 본의 모든 자식 본을 탐색하며 메시 찾기
-        if (bone.children) {
-            bone.children.forEach(child => {
-                if (child.isMesh && child.material) {
-                    meshes.push(child);
-                } else if (child.isBone) {
-                    // 재귀적으로 자식 본의 메시 찾기
-                    this.findRelatedMeshes(child, meshes);
-                    this.findChildBonesAndMeshes(child, meshes);
+    // 메시에 하이라이트 적용 (본과 관련된 부분만)
+    applyHighlightToMesh(mesh, bone) {
+        if (!mesh || !mesh.material) return;
+        
+        try {
+            // 원본 재질 백업
+            if (!this.originalMaterials.has(mesh.uuid)) {
+                if (Array.isArray(mesh.material)) {
+                    // 다중 재질인 경우 모든 재질 복제
+                    const originalMaterials = mesh.material.map(mat => mat.clone());
+                    this.originalMaterials.set(mesh.uuid, originalMaterials);
                 } else {
-                    // 본이나 메시가 아닌 객체의 자식도 검사
-                    this.findChildBonesAndMeshes(child, meshes);
+                    this.originalMaterials.set(mesh.uuid, mesh.material.clone());
                 }
-            });
+                console.log(`원본 재질 저장: ${mesh.name}`);
+            }
+            
+            // 스키닝 메시인 경우 본의 인덱스 찾기
+            let boneIndex = -1;
+            if (mesh.isSkinnedMesh && mesh.skeleton) {
+                boneIndex = mesh.skeleton.bones.findIndex(b => b.uuid === bone.uuid);
+            }
+            
+            // 강조 색상 적용 
+            const highlightColor = new THREE.Color(0x4285f4);
+            
+            if (Array.isArray(mesh.material)) {
+                // 다중 재질 처리
+                mesh.material = mesh.material.map(mat => {
+                    if (!mat) return null;
+                    
+                    const newMat = mat.clone();
+                    newMat.emissive = highlightColor;
+                    newMat.emissiveIntensity = 0.5;
+                    
+                    // 스키닝 메시인 경우 더 뚜렷하게
+                    if (boneIndex >= 0) {
+                        newMat.emissiveIntensity = 0.7;
+                    }
+                    
+                    newMat.needsUpdate = true;
+                    return newMat;
+                });
+            } else {
+                // 단일 재질 처리
+                const newMaterial = mesh.material.clone();
+                newMaterial.emissive = highlightColor;
+                newMaterial.emissiveIntensity = 0.5;
+                
+                // 스키닝 메시인 경우 더 뚜렷하게
+                if (boneIndex >= 0) {
+                    newMaterial.emissiveIntensity = 0.7;
+                }
+                
+                newMaterial.needsUpdate = true;
+                mesh.material = newMaterial;
+            }
+            
+            console.log(`강조 색상 적용됨: ${mesh.name}`);
+        } catch (e) {
+            console.error(`재질 적용 중 오류 (${mesh.name}): ${e.message}`);
         }
     }
     
     resetBoneHighlight() {
         if (!this.highlightedBone) return;
         
+        console.log(`본 강조 해제: ${this.highlightedBone.name}`);
+        
         // BoxHelper 제거
-        if (this.highlightedBone.userData.visualizer) {
-            this.highlightedBone.remove(this.highlightedBone.userData.visualizer);
-            this.highlightedBone.userData.visualizer = null;
+        if (this.boneHelper) {
+            this.scene.remove(this.boneHelper);
+            this.boneHelper = null;
         }
         
-        // 관련 메시 재질 복원
-        this.originalMaterials.forEach((material, uuid) => {
-            // 씬에서 해당 UUID를 가진 객체 찾기
-            const object = this.findObjectByUuid(this.scene, uuid);
-            if (object && object.isMesh) {
-                object.material = material;
-                object.material.needsUpdate = true;
-            }
-        });
+        // 본에 추가된 AxesHelper 제거
+        if (this.boneAxisHelper && this.highlightedBone) {
+            this.highlightedBone.remove(this.boneAxisHelper);
+            this.boneAxisHelper = null;
+        }
         
-        // 원본 재질 맵 초기화
+        // 본에 추가된 반투명 구체 제거
+        if (this.boneSphere && this.highlightedBone) {
+            this.highlightedBone.remove(this.boneSphere);
+            this.boneSphere = null;
+        }
+        
+        // 원래는 메시 재질을 복원했지만, 이제 메시 색상을 변경하지 않으므로 필요 없음
+        // 혹시 있을 수 있는 메시 재질 데이터 초기화
         this.originalMaterials.clear();
+        
         this.highlightedBone = null;
     }
     

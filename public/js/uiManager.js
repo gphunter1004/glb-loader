@@ -218,9 +218,11 @@ export class UIManager {
         const label = document.createElement('div');
         label.className = 'slider-label';
         label.textContent = bone.name;
+        label.title = `UUID: ${bone.uuid}`;  // UUID를 툴팁으로 표시
         
         // 라벨 클릭 시 해당 본 강조
         label.addEventListener('click', () => {
+            console.log(`슬라이더 라벨 클릭: ${bone.name}, UUID: ${bone.uuid}`);
             if (this.highlightBoneCallback) {
                 this.highlightBoneCallback(bone.uuid);
             }
@@ -423,12 +425,15 @@ export class UIManager {
         const prevActive = document.querySelectorAll('.active-bone');
         prevActive.forEach(el => el.classList.remove('active-bone'));
         
-        // 현재 선택된 본 강조 표시
-        const sliders = document.querySelectorAll(`.axis-slider[data-bone="${boneUuid}"]`);
-        if (sliders.length > 0) {
-            const container = sliders[0].closest('.slider-container');
-            if (container) {
+        console.log(`슬라이더 강조: ${boneUuid}`);
+        
+        // 현재 선택된 본 강조 표시 (데이터 속성으로 찾기)
+        const containers = document.querySelectorAll(`.slider-container`);
+        for (const container of containers) {
+            const sliders = container.querySelectorAll(`.axis-slider[data-bone="${boneUuid}"]`);
+            if (sliders.length > 0) {
                 container.classList.add('active-bone');
+                console.log(`본 슬라이더 찾음: ${container.textContent.split('\n')[0].trim()}, 강조 적용`);
                 
                 // 강조된 본이 속한 그룹 컨텐츠가 닫혀있으면 열기
                 const parentContent = container.closest('.bone-content');
@@ -442,6 +447,7 @@ export class UIManager {
                 
                 // 강조된 본이 보이도록 스크롤
                 container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                break;
             }
         }
     }
