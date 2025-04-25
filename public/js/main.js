@@ -62,10 +62,33 @@ window.addEventListener('DOMContentLoaded', function() {
         
         console.log(`스키닝 메시 ${skinnedMeshes.length}개 발견`);
         
+        // 모든 메시와 그 부모 본 관계 추적
+        const meshParentMap = new Map();  // 메시 UUID -> 부모 본 UUID
+        
+        // 모델 내의 모든 객체 탐색
+        model.traverse(object => {
+            if (object.isMesh || object.isSkinnedMesh) {
+                // 이 메시의 부모 본 찾기
+                let currentObj = object;
+                while (currentObj && currentObj.parent) {
+                    currentObj = currentObj.parent;
+                    // 부모가 본인지 확인
+                    if (bones.some(b => b.uuid === currentObj.uuid)) {
+                        meshParentMap.set(object.uuid, currentObj.uuid);
+                        console.log(`메시 "${object.name}"의 부모 본: "${currentObj.name}" (${currentObj.uuid})`);
+                        break;
+                    }
+                }
+            }
+        });
+        
+        console.log(`메시-부모 본 관계 ${meshParentMap.size}개 설정됨`);
+        
         // 본과 스키닝 메시 관계 설정
         bones.forEach(bone => {
             // 관련 메시 목록 초기화
             bone.userData.relatedMeshes = [];
+            bone.userData.childMeshes = [];
             
             // 이 본을 사용하는 스키닝 메시 찾기
             skinnedMeshes.forEach(mesh => {
@@ -74,6 +97,16 @@ window.addEventListener('DOMContentLoaded', function() {
                     if (boneIndex >= 0) {
                         bone.userData.relatedMeshes.push(mesh);
                         console.log(`본 ${bone.name} - 스키닝 메시 ${mesh.name} 연결`);
+                    }
+                }
+            });
+            
+            // 이 본이 부모인 메시 찾기
+            model.traverse(obj => {
+                if ((obj.isMesh || obj.isSkinnedMesh) && meshParentMap.get(obj.uuid) === bone.uuid) {
+                    if (!bone.userData.childMeshes.includes(obj)) {
+                        bone.userData.childMeshes.push(obj);
+                        console.log(`본 ${bone.name} - 자식 메시 ${obj.name} 연결`);
                     }
                 }
             });
@@ -86,6 +119,26 @@ window.addEventListener('DOMContentLoaded', function() {
         const model = sceneManager.getCurrentModel();
         
         console.log(`설정할 본 개수: ${bones.length}`);
+        
+        // 디버깅용 - 모든 본 UUID 목록 출력
+        console.log("모든 본 UUID 목록:");
+        bones.forEach(bone => {
+            console.log(`${bone.name}: ${bone.uuid}`);
+        });
+        
+        // 직계 부모 본 체크
+        function findParentBone(object) {
+            if (!object) return null;
+            let current = object;
+            while (current && current !== model) {
+                const parent = current.parent;
+                if (parent && bones.includes(parent)) {
+                    return parent;
+                }
+                current = parent;
+            }
+            return null;
+        }
         
         // 클릭 이벤트 핸들러
         function handleModelClick(event) {
@@ -113,33 +166,52 @@ window.addEventListener('DOMContentLoaded', function() {
                 const clickPoint = intersects[0].point;
                 console.log(`클릭된 객체: ${clickedObject.name}, UUID: ${clickedObject.uuid}`);
                 
-                // 1. 클릭된 객체가 스키닝 메시인지 확인
-                if (clickedObject.isSkinnedMesh && clickedObject.skeleton) {
-                    // 클릭된 지점에 가장 영향력이 큰 본 찾기
-                    const boneUuid = findInfluentialBoneAtPoint(clickedObject, clickPoint, intersects[0]);
-                    if (boneUuid) {
-                        console.log(`스키닝 메시에서 영향력 있는 본 찾음: ${boneUuid}`);
-                        highlightBone(boneUuid);
-                        return;
+                // 1. 클릭된 객체의 부모 체인을 탐색하여 본 찾기
+                let selectedBone = null;
+                let currentObj = clickedObject;
+                
+                console.log(`클릭 체인 분석 시작: ${clickedObject.name || "unnamed"}, UUID: ${clickedObject.uuid}`);
+                
+                // 클릭된 객체 자체가 본인지 먼저 확인
+                if (bones.some(b => b.uuid === clickedObject.uuid)) {
+                    selectedBone = clickedObject;
+                    console.log(`클릭된 객체 자체가 본임: ${selectedBone.name}, UUID: ${selectedBone.uuid}`);
+                }
+                // 본이 아니면 부모 체인 탐색
+                else {
+                    // 부모 체인의 모든 객체 나열 (디버깅용)
+                    let debugChain = [];
+                    let tempObj = clickedObject;
+                    while (tempObj) {
+                        const isBone = bones.some(b => b.uuid === tempObj.uuid);
+                        debugChain.push(`${tempObj.name || "unnamed"} (${tempObj.uuid.slice(0,8)}...) ${isBone ? "- 본" : ""}`);
+                        tempObj = tempObj.parent;
+                    }
+                    console.log("부모 체인:", debugChain.join(" → "));
+                    
+                    // 부모 중에서 본 찾기
+                    while (currentObj && currentObj.parent && !selectedBone) {
+                        currentObj = currentObj.parent;
+                        if (bones.some(b => b.uuid === currentObj.uuid)) {
+                            selectedBone = currentObj;
+                            console.log(`부모 객체가 본임: ${selectedBone.name}, UUID: ${selectedBone.uuid}`);
+                            break;
+                        }
                     }
                 }
                 
-                // 2. 클릭된 객체가 본의 직계 자식 메시인지 확인
-                let currentObject = clickedObject;
-                while (currentObject && currentObject !== model) {
-                    const parent = currentObject.parent;
-                    if (parent && bones.includes(parent)) {
-                        console.log(`직계 부모가 본임: ${parent.name}`);
-                        highlightBone(parent.uuid);
-                        return;
-                    }
-                    currentObject = parent;
+                // 2. 본을 찾았으면 강조 표시
+                if (selectedBone) {
+                    console.log(`선택된 본: ${selectedBone.name}, UUID: ${selectedBone.uuid}`);
+                    console.log(`강조할 UUID: ${selectedBone.uuid}`);
+                    highlightBone(selectedBone.uuid);
+                    return;
                 }
                 
-                // 3. 클릭 포인트에서 가장 가까운 본 찾기 (더 정확한 방법)
+                // 3. 본을 찾지 못했으면 가장 가까운 본 찾기
                 const closestBone = findClosestVisibleBone(clickPoint, bones, camera);
                 if (closestBone) {
-                    console.log(`가장 가까운 본 선택: ${closestBone.name}`);
+                    console.log(`가장 가까운 본 선택: ${closestBone.name}, UUID: ${closestBone.uuid}`);
                     highlightBone(closestBone.uuid);
                 }
             }
@@ -277,6 +349,15 @@ window.addEventListener('DOMContentLoaded', function() {
     
     // 본 강조 표시
     function highlightBone(boneUuid) {
+        console.log(`본 강조 함수 호출됨: UUID=${boneUuid}`);
+        
+        // 본 UUID가 유효한지 확인
+        const bone = boneController.getBones().find(b => b.uuid === boneUuid);
+        if (!bone) {
+            console.error(`유효하지 않은 본 UUID: ${boneUuid}`);
+            return;
+        }
+        
         // UI에서 슬라이더 강조
         uiManager.highlightBoneSlider(boneUuid);
         

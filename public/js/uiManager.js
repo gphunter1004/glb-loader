@@ -1,6 +1,7 @@
 // uiManager.js - UI 관련 기능 관리
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
 export class UIManager {
     constructor(modelLoadCallback, highlightBoneCallback) {
         this.modelLoadCallback = modelLoadCallback;
@@ -215,6 +216,15 @@ export class UIManager {
         container.className = 'slider-container';
         container.dataset.boneUuid = bone.uuid;
         
+        // UUID 디버깅 정보 추가
+        const debugInfo = document.createElement('div');
+        debugInfo.className = 'debug-info';
+        debugInfo.style.fontSize = '9px';
+        debugInfo.style.color = '#999';
+        debugInfo.style.marginBottom = '2px';
+        debugInfo.textContent = `UUID: ${bone.uuid}`;
+        container.appendChild(debugInfo);
+        
         const label = document.createElement('div');
         label.className = 'slider-label';
         label.textContent = bone.name;
@@ -229,7 +239,7 @@ export class UIManager {
         });
         
         container.appendChild(label);
-        
+
         // X, Y, Z 축 회전 슬라이더 생성
         const axisContainer = document.createElement('div');
         axisContainer.className = 'axis-sliders';
@@ -258,6 +268,7 @@ export class UIManager {
             slider.max = Math.PI;
             slider.step = 0.01;
             slider.value = bone.rotation[axis];
+            slider.dataset.bone = bone.uuid;  // 중요: 여기에 본의 UUID 저장
             
             // 값, 최소값, 최대값 행 한 줄로 생성
             const valueLimitRow = document.createElement('div');
@@ -427,28 +438,70 @@ export class UIManager {
         
         console.log(`슬라이더 강조: ${boneUuid}`);
         
-        // 현재 선택된 본 강조 표시 (데이터 속성으로 찾기)
-        const containers = document.querySelectorAll(`.slider-container`);
-        for (const container of containers) {
-            const sliders = container.querySelectorAll(`.axis-slider[data-bone="${boneUuid}"]`);
-            if (sliders.length > 0) {
-                container.classList.add('active-bone');
-                console.log(`본 슬라이더 찾음: ${container.textContent.split('\n')[0].trim()}, 강조 적용`);
+        // 정확한 슬라이더 찾기를 위한 로그
+        console.log(`슬라이더 검색 시작 - UUID: ${boneUuid}`);
+        
+        // 모든 슬라이더에 data-bone 어트리뷰트 출력 (문제 진단용)
+        const allSliders = document.querySelectorAll('.axis-slider');
+        console.log(`전체 축 슬라이더 수: ${allSliders.length}`);
+        
+        // 첫 10개만 출력 (너무 많지 않게)
+        const sampleSize = Math.min(10, allSliders.length);
+        console.log(`첫 ${sampleSize}개 슬라이더의 data-bone 값:`);
+        for (let i = 0; i < sampleSize; i++) {
+            console.log(`슬라이더 ${i}: data-bone="${allSliders[i].dataset.bone}"`);
+        }
+        
+        // 정확한 대상 슬라이더 찾기
+        const targetSliders = document.querySelectorAll(`.axis-slider[data-bone="${boneUuid}"]`);
+        console.log(`매칭된 슬라이더 수: ${targetSliders.length}`);
+        
+        // 컨테이너에서도 찾기
+        const containers = document.querySelectorAll('.slider-container');
+        console.log(`전체 슬라이더 컨테이너 수: ${containers.length}`);
+        
+        let container = null;
+        
+        // 1. 슬라이더에서 직접 찾기
+        if (targetSliders.length > 0) {
+            container = targetSliders[0].closest('.slider-container');
+            console.log(`슬라이더로부터 컨테이너 찾음: ${container ? 'success' : 'failed'}`);
+        }
+        
+        // 2. 컨테이너의 data-bone-uuid에서 찾기
+        if (!container) {
+            for (const cont of containers) {
+                const contBoneUuid = cont.dataset.boneUuid;
+                console.log(`컨테이너 체크: "${contBoneUuid}" vs "${boneUuid}"`);
                 
-                // 강조된 본이 속한 그룹 컨텐츠가 닫혀있으면 열기
-                const parentContent = container.closest('.bone-content');
-                if (parentContent && !parentContent.classList.contains('open')) {
-                    parentContent.classList.add('open');
-                    const toggleIcon = parentContent.previousElementSibling.querySelector('.toggle-icon');
-                    if (toggleIcon) {
-                        toggleIcon.textContent = '-';
-                    }
+                if (contBoneUuid === boneUuid) {
+                    container = cont;
+                    console.log('컨테이너 UUID 일치함');
+                    break;
                 }
-                
-                // 강조된 본이 보이도록 스크롤
-                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                break;
             }
+        }
+        
+        // 컨테이너를 찾은 경우 강조 표시
+        if (container) {
+            container.classList.add('active-bone');
+            const labelText = container.querySelector('.slider-label')?.textContent || '알 수 없음';
+            console.log(`본 슬라이더 찾음: ${labelText}, 강조 적용`);
+            
+            // 강조된 본이 속한 그룹 컨텐츠가 닫혀있으면 열기
+            const parentContent = container.closest('.bone-content');
+            if (parentContent && !parentContent.classList.contains('open')) {
+                parentContent.classList.add('open');
+                const toggleIcon = parentContent.previousElementSibling.querySelector('.toggle-icon');
+                if (toggleIcon) {
+                    toggleIcon.textContent = '-';
+                }
+            }
+            
+            // 강조된 본이 보이도록 스크롤
+            container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+            console.error(`UUID가 ${boneUuid}인 슬라이더를 찾을 수 없음`);
         }
     }
     
