@@ -1,93 +1,30 @@
-// boneController.js - 본 조작 및 분류 관리
+// boneController.js - 본 제어 및 관리
 import * as THREE from 'three';
+
 export class BoneController {
     constructor() {
         this.bones = [];
-        this.originalBoneRotations = new Map();
+        this.originalRotations = new Map();
         this.boneGroups = {};
     }
     
     setBones(bones) {
         this.bones = bones;
-        this.originalBoneRotations = new Map();
         
-        // 원본 회전값 저장
+        // 본 원래 회전값 저장
+        this.originalRotations.clear();
         bones.forEach(bone => {
-            this.originalBoneRotations.set(bone.uuid, {
+            this.originalRotations.set(bone.uuid, {
                 x: bone.rotation.x,
                 y: bone.rotation.y,
                 z: bone.rotation.z
             });
         });
         
-        // 본 그룹화
-        this.categorizeBones();
-    }
-    
-    categorizeBones() {
-        // 본을 그룹화하기 위한 객체 초기화
-        this.boneGroups = {};
+        // 본 그룹화 실행
+        this.groupBones();
         
-        // 본 이름에서 그룹 이름 추출하여 분류
-        this.bones.forEach(bone => {
-            let groupName = '기타';
-            const boneName = bone.name;
-            
-            // 이름으로 본 그룹화 (예: Left_Arm, Right_Leg 등)
-            if (boneName.includes('Left') || boneName.includes('left') || boneName.includes('L_')) {
-                groupName = '왼쪽';
-            } else if (boneName.includes('Right') || boneName.includes('right') || boneName.includes('R_')) {
-                groupName = '오른쪽';
-            } else if (boneName.includes('Head') || boneName.includes('head') || boneName.includes('Face') || boneName.includes('face')) {
-                groupName = '머리';
-            } else if (boneName.includes('Spine') || boneName.includes('spine') || boneName.includes('Torso') || boneName.includes('Body')) {
-                groupName = '몸통';
-            } else if (boneName.includes('Root') || boneName.includes('root') || boneName.includes('Hips') || boneName.includes('hips')) {
-                groupName = '루트/엉덩이';
-            } else if (boneName.includes('Hand') || boneName.includes('hand') || boneName.includes('Finger') || boneName.includes('finger')) {
-                if (boneName.includes('Left') || boneName.includes('left') || boneName.includes('L_')) {
-                    groupName = '왼쪽 손/손가락';
-                } else if (boneName.includes('Right') || boneName.includes('right') || boneName.includes('R_')) {
-                    groupName = '오른쪽 손/손가락';
-                } else {
-                    groupName = '손/손가락';
-                }
-            } else if (boneName.includes('Foot') || boneName.includes('foot') || boneName.includes('Toe') || boneName.includes('toe')) {
-                if (boneName.includes('Left') || boneName.includes('left') || boneName.includes('L_')) {
-                    groupName = '왼쪽 발/발가락';
-                } else if (boneName.includes('Right') || boneName.includes('right') || boneName.includes('R_')) {
-                    groupName = '오른쪽 발/발가락';
-                } else {
-                    groupName = '발/발가락';
-                }
-            } else if (boneName.includes('Arm') || boneName.includes('arm')) {
-                if (boneName.includes('Left') || boneName.includes('left') || boneName.includes('L_')) {
-                    groupName = '왼쪽 팔';
-                } else if (boneName.includes('Right') || boneName.includes('right') || boneName.includes('R_')) {
-                    groupName = '오른쪽 팔';
-                } else {
-                    groupName = '팔';
-                }
-            } else if (boneName.includes('Leg') || boneName.includes('leg')) {
-                if (boneName.includes('Left') || boneName.includes('left') || boneName.includes('L_')) {
-                    groupName = '왼쪽 다리';
-                } else if (boneName.includes('Right') || boneName.includes('right') || boneName.includes('R_')) {
-                    groupName = '오른쪽 다리';
-                } else {
-                    groupName = '다리';
-                }
-            }
-            
-            // 그룹에 본 추가
-            if (!this.boneGroups[groupName]) {
-                this.boneGroups[groupName] = [];
-            }
-            this.boneGroups[groupName].push(bone);
-        });
-    }
-    
-    getBoneGroups() {
-        return this.boneGroups;
+        console.log(`${bones.length}개의 본 설정됨`);
     }
     
     getBones() {
@@ -95,31 +32,166 @@ export class BoneController {
     }
     
     getOriginalRotations() {
-        return this.originalBoneRotations;
+        return this.originalRotations;
     }
     
+    getBoneGroups() {
+        return this.boneGroups;
+    }
+    
+    // 본 이름과 구조에 따른 그룹화
+    groupBones() {
+        this.boneGroups = {
+            '루트/엉덩이': [],
+            '머리': [],
+            '몸통': [],
+            '왼쪽 팔': [],
+            '오른쪽 팔': [],
+            '왼쪽 손/손가락': [],
+            '오른쪽 손/손가락': [],
+            '왼쪽 다리': [],
+            '오른쪽 다리': [],
+            '왼쪽 발/발가락': [],
+            '오른쪽 발/발가락': [],
+            '왼쪽': [],
+            '오른쪽': [],
+            '기타': []
+        };
+        
+        const lowerWords = {
+            left: '왼쪽',
+            right: '오른쪽',
+            l_: '왼쪽',
+            r_: '오른쪽',
+            l: '왼쪽',
+            r: '오른쪽',
+            _l_: '왼쪽',
+            _r_: '오른쪽',
+            '_l': '왼쪽',
+            '_r': '오른쪽'
+        };
+        
+        // 머리, 몸통 관련 단어
+        const headWords = ['head', 'skull', 'neck', 'kopf'];
+        const torsoWords = ['spine', 'chest', 'rib', 'hip', 'torso', 'pelvis', 'brust', 'bauch'];
+        
+        // 팔, 손 관련 단어
+        const armWords = ['arm', 'shoulder', 'elbow', 'wrist', 'schulter'];
+        const handWords = ['hand', 'finger', 'thumb', 'pinky', 'index', 'middle', 'ring'];
+        
+        // 다리, 발 관련 단어
+        const legWords = ['leg', 'thigh', 'knee', 'shin', 'bein', 'schenkel'];
+        const footWords = ['foot', 'toe', 'ankle', 'fuss'];
+        
+        // 루트 관련 단어
+        const rootWords = ['root', 'hip', 'pelvis', 'becken'];
+        
+        this.bones.forEach(bone => {
+            const name = bone.name.toLowerCase();
+            let assigned = false;
+            
+            // 루트 또는 부모가 null인 본
+            if (!bone.parent || rootWords.some(word => name.includes(word))) {
+                this.boneGroups['루트/엉덩이'].push(bone);
+                assigned = true;
+            } 
+            // 머리 관련 본
+            else if (headWords.some(word => name.includes(word))) {
+                this.boneGroups['머리'].push(bone);
+                assigned = true;
+            } 
+            // 몸통 관련 본
+            else if (torsoWords.some(word => name.includes(word))) {
+                this.boneGroups['몸통'].push(bone);
+                assigned = true;
+            } 
+            else {
+                // 왼쪽/오른쪽 구분
+                let side = null;
+                for (const [key, value] of Object.entries(lowerWords)) {
+                    if (name.includes(key)) {
+                        side = value;
+                        break;
+                    }
+                }
+                
+                // 팔/손/다리/발 구분
+                if (side) {
+                    if (armWords.some(word => name.includes(word))) {
+                        this.boneGroups[`${side} 팔`].push(bone);
+                        assigned = true;
+                    } else if (handWords.some(word => name.includes(word))) {
+                        this.boneGroups[`${side} 손/손가락`].push(bone);
+                        assigned = true;
+                    } else if (legWords.some(word => name.includes(word))) {
+                        this.boneGroups[`${side} 다리`].push(bone);
+                        assigned = true;
+                    } else if (footWords.some(word => name.includes(word))) {
+                        this.boneGroups[`${side} 발/발가락`].push(bone);
+                        assigned = true;
+                    } else {
+                        // 구체적인 파트를 알 수 없지만 왼쪽/오른쪽은 구분 가능
+                        this.boneGroups[side].push(bone);
+                        assigned = true;
+                    }
+                }
+            }
+            
+            // 어디에도 할당되지 않았다면 '기타'로 분류
+            if (!assigned) {
+                this.boneGroups['기타'].push(bone);
+            }
+        });
+        
+        // 그룹별 본 개수 출력
+        for (const [groupName, groupBones] of Object.entries(this.boneGroups)) {
+            if (groupBones.length > 0) {
+                console.log(`그룹 ${groupName}: ${groupBones.length}개 본`);
+            }
+        }
+    }
+    
+    // 특정 본 회전 초기화
     resetBoneRotation(boneUuid) {
         const bone = this.bones.find(b => b.uuid === boneUuid);
-        const originalRotation = this.originalBoneRotations.get(boneUuid);
+        if (!bone) return false;
         
-        if (bone && originalRotation) {
-            bone.rotation.x = originalRotation.x;
-            bone.rotation.y = originalRotation.y;
-            bone.rotation.z = originalRotation.z;
-            return true;
-        }
+        const originalRotation = this.originalRotations.get(boneUuid);
+        if (!originalRotation) return false;
         
-        return false;
+        bone.rotation.x = originalRotation.x;
+        bone.rotation.y = originalRotation.y;
+        bone.rotation.z = originalRotation.z;
+        
+        return true;
     }
     
-    updateBoneRotation(boneUuid, axis, value) {
-        const bone = this.bones.find(b => b.uuid === boneUuid);
+    // 모든 본 회전 초기화
+    resetAllBoneRotations() {
+        this.bones.forEach(bone => {
+            this.resetBoneRotation(bone.uuid);
+        });
+    }
+    
+    // 특정 본 찾기
+    findBoneByName(name) {
+        return this.bones.find(bone => bone.name === name);
+    }
+    
+    findBoneByUuid(uuid) {
+        return this.bones.find(bone => bone.uuid === uuid);
+    }
+    
+    // 계층 관계에 따른 본 회전 제어
+    rotateBoneAndChildren(boneUuid, rotation) {
+        const bone = this.findBoneByUuid(boneUuid);
+        if (!bone) return false;
         
-        if (bone && ['x', 'y', 'z'].includes(axis)) {
-            bone.rotation[axis] = value;
-            return true;
-        }
+        // 현재 본 회전
+        bone.rotation.x = rotation.x !== undefined ? rotation.x : bone.rotation.x;
+        bone.rotation.y = rotation.y !== undefined ? rotation.y : bone.rotation.y;
+        bone.rotation.z = rotation.z !== undefined ? rotation.z : bone.rotation.z;
         
-        return false;
+        return true;
     }
 }

@@ -247,6 +247,16 @@ export class UIManager {
         const axes = ['x', 'y', 'z'];
         const axisColors = {x: '#ff4136', y: '#2ecc40', z: '#0074d9'};
         
+        // 본 회전 제한 기본값 (없을 경우)
+        const defaultLimits = {
+            x: { min: -Math.PI, max: Math.PI },
+            y: { min: -Math.PI, max: Math.PI },
+            z: { min: -Math.PI, max: Math.PI }
+        };
+        
+        // 현재 본의 회전 제한 가져오기 (없으면 기본값 사용)
+        const rotationLimits = bone.userData.rotationLimits || defaultLimits;
+        
         axes.forEach(axis => {
             const axisDiv = document.createElement('div');
             axisDiv.className = 'axis-slider';
@@ -262,13 +272,16 @@ export class UIManager {
             axisLabel.textContent = axis.toUpperCase();
             axisLabel.style.color = axisColors[axis];
             
+            // 현재 축의 회전 제한 가져오기
+            const axisLimit = rotationLimits[axis] || { min: -Math.PI, max: Math.PI };
+            
             const slider = document.createElement('input');
             slider.type = 'range';
-            slider.min = -Math.PI;
-            slider.max = Math.PI;
+            slider.min = axisLimit.min;
+            slider.max = axisLimit.max;
             slider.step = 0.01;
             slider.value = bone.rotation[axis];
-            slider.dataset.bone = bone.uuid;  // 중요: 여기에 본의 UUID 저장
+            slider.dataset.bone = bone.uuid;
             
             // 값, 최소값, 최대값 행 한 줄로 생성
             const valueLimitRow = document.createElement('div');
@@ -350,6 +363,12 @@ export class UIManager {
                             bone.rotation[axis] = minVal;
                             valueInput.value = minVal.toFixed(2);
                         }
+                        
+                        // 회전 제한 정보 업데이트
+                        if (!bone.userData.rotationLimits) {
+                            bone.userData.rotationLimits = { ...defaultLimits };
+                        }
+                        bone.userData.rotationLimits[axis].min = minVal;
                     } else {
                         minInput.value = slider.min;
                         alert('최소값은 최대값보다 작아야 합니다');
@@ -370,6 +389,12 @@ export class UIManager {
                             bone.rotation[axis] = maxVal;
                             valueInput.value = maxVal.toFixed(2);
                         }
+                        
+                        // 회전 제한 정보 업데이트
+                        if (!bone.userData.rotationLimits) {
+                            bone.userData.rotationLimits = { ...defaultLimits };
+                        }
+                        bone.userData.rotationLimits[axis].max = maxVal;
                     } else {
                         maxInput.value = slider.max;
                         alert('최대값은 최소값보다 커야 합니다');
@@ -428,58 +453,94 @@ export class UIManager {
         
         container.appendChild(resetButton);
         
+        // 회전 제한 업데이트 이벤트 리스너 추가
+        this.setupRotationLimitsListener(container, bone.uuid);
+        
         return container;
+    }
+    
+    // 회전 제한 업데이트 이벤트 리스너
+    setupRotationLimitsListener(container, boneUuid) {
+        // 이벤트 리스너 함수
+        const updateLimitsHandler = (event) => {
+            const { boneUuid: eventBoneUuid, limits } = event.detail;
+            
+            // 현재 컨테이너의 본과 일치하는지 확인
+            if (eventBoneUuid === boneUuid) {
+                console.log(`슬라이더 제한 업데이트: ${boneUuid}`);
+                
+                // 각 축의 슬라이더 및 입력 필드 업데이트
+                const axes = ['x', 'y', 'z'];
+                
+                axes.forEach((axis, index) => {
+                    const axisLimit = limits[axis];
+                    
+                    // 슬라이더 및 입력 필드 찾기
+                    const slider = container.querySelector(`.axis-slider[data-axis="${axis}"] input[type="range"]`);
+                    const minInput = container.querySelector(`.axis-slider[data-axis="${axis}"] .limit-input:first-of-type`);
+                    const maxInput = container.querySelector(`.axis-slider[data-axis="${axis}"] .limit-input:last-of-type`);
+                    
+                    if (slider && minInput && maxInput) {
+                        // 최소/최대값 설정
+                        slider.min = axisLimit.min;
+                        slider.max = axisLimit.max;
+                        
+                        minInput.value = axisLimit.min.toFixed(2);
+                        maxInput.value = axisLimit.max.toFixed(2);
+                        
+                        // 현재 값이 범위를 벗어나면 조정
+                        const currentValue = parseFloat(slider.value);
+                        if (currentValue < axisLimit.min) {
+                            slider.value = axisLimit.min;
+                        } else if (currentValue > axisLimit.max) {
+                            slider.value = axisLimit.max;
+                        }
+                    }
+                });
+            }
+        };
+        
+        // 이벤트 리스너 등록
+        document.addEventListener('bone-rotation-limits', updateLimitsHandler);
+        
+        // 컨테이너에 리스너 참조 저장 (나중에 정리할 수 있도록)
+        container.updateLimitsHandler = updateLimitsHandler;
     }
     
     highlightBoneSlider(boneUuid) {
         // 이전 강조 표시 제거
         const prevActive = document.querySelectorAll('.active-bone');
-        prevActive.forEach(el => el.classList.remove('active-bone'));
+        if (prevActive.length > 0) {
+            console.log(`${prevActive.length}개의 이전 강조 제거`);
+            prevActive.forEach(el => {
+                el.classList.remove('active-bone');
+            });
+        }
         
         console.log(`슬라이더 강조: ${boneUuid}`);
         
         // 정확한 슬라이더 찾기를 위한 로그
         console.log(`슬라이더 검색 시작 - UUID: ${boneUuid}`);
         
-        // 모든 슬라이더에 data-bone 어트리뷰트 출력 (문제 진단용)
-        const allSliders = document.querySelectorAll('.axis-slider');
-        console.log(`전체 축 슬라이더 수: ${allSliders.length}`);
-        
-        // 첫 10개만 출력 (너무 많지 않게)
-        const sampleSize = Math.min(10, allSliders.length);
-        console.log(`첫 ${sampleSize}개 슬라이더의 data-bone 값:`);
-        for (let i = 0; i < sampleSize; i++) {
-            console.log(`슬라이더 ${i}: data-bone="${allSliders[i].dataset.bone}"`);
-        }
+        // 데이터 속성 선택자 문자열 만들기
+        const dataSelector = `[data-bone="${boneUuid}"]`;
+        console.log(`슬라이더 선택자: ${dataSelector}`);
         
         // 정확한 대상 슬라이더 찾기
-        const targetSliders = document.querySelectorAll(`.axis-slider[data-bone="${boneUuid}"]`);
+        const targetSliders = document.querySelectorAll(dataSelector);
         console.log(`매칭된 슬라이더 수: ${targetSliders.length}`);
         
-        // 컨테이너에서도 찾기
-        const containers = document.querySelectorAll('.slider-container');
-        console.log(`전체 슬라이더 컨테이너 수: ${containers.length}`);
+        // 컨테이너 선택자
+        const containerSelector = `.slider-container[data-bone-uuid="${boneUuid}"]`;
+        console.log(`컨테이너 선택자: ${containerSelector}`);
+        const directContainer = document.querySelector(containerSelector);
         
-        let container = null;
+        let container = directContainer;
         
-        // 1. 슬라이더에서 직접 찾기
-        if (targetSliders.length > 0) {
+        // 직접 컨테이너를 찾지 못했지만 슬라이더는 찾은 경우
+        if (!container && targetSliders.length > 0) {
             container = targetSliders[0].closest('.slider-container');
             console.log(`슬라이더로부터 컨테이너 찾음: ${container ? 'success' : 'failed'}`);
-        }
-        
-        // 2. 컨테이너의 data-bone-uuid에서 찾기
-        if (!container) {
-            for (const cont of containers) {
-                const contBoneUuid = cont.dataset.boneUuid;
-                console.log(`컨테이너 체크: "${contBoneUuid}" vs "${boneUuid}"`);
-                
-                if (contBoneUuid === boneUuid) {
-                    container = cont;
-                    console.log('컨테이너 UUID 일치함');
-                    break;
-                }
-            }
         }
         
         // 컨테이너를 찾은 경우 강조 표시
@@ -496,12 +557,22 @@ export class UIManager {
                 if (toggleIcon) {
                     toggleIcon.textContent = '-';
                 }
+                console.log("그룹 컨텐츠 확장됨");
             }
             
             // 강조된 본이 보이도록 스크롤
             container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            console.log("슬라이더로 스크롤됨");
         } else {
             console.error(`UUID가 ${boneUuid}인 슬라이더를 찾을 수 없음`);
+            
+            // 디버깅용: 모든 슬라이더 컨테이너의 UUID 출력
+            const allContainers = document.querySelectorAll('.slider-container');
+            console.log(`전체 슬라이더 컨테이너 수: ${allContainers.length}`);
+            console.log("첫 10개 컨테이너의 UUID:");
+            for (let i = 0; i < Math.min(10, allContainers.length); i++) {
+                console.log(`컨테이너 ${i}: ${allContainers[i].dataset.boneUuid}`);
+            }
         }
     }
     

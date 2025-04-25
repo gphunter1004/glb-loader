@@ -38,7 +38,7 @@ export class SceneManager {
     setupCamera() {
         const container = document.getElementById('scene-container');
         const aspect = container.clientWidth / container.clientHeight;
-        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 2000);
         this.camera.position.z = 5;
     }
     
