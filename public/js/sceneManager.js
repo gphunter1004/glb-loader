@@ -24,6 +24,13 @@ export class SceneManager {
         this.boneSphere = null;
         this.originalMaterials = new Map();
         
+        // 본 포인트 관련 변수
+        this.bonePoints = new Map();
+        this.bonePointsGroup = null;
+        this.bonePointsVisible = false;
+        this.pointClickListener = null;
+        this.mouseMoveHandler = null;
+        
         // 디버깅 정보
         this.debugMode = true;
     }
@@ -125,6 +132,10 @@ export class SceneManager {
         return this.currentModel;
     }
     
+    getHighlightedBone() {
+        return this.highlightedBone;
+    }
+    
     highlightBone(bones, boneUuid) {
         // 이전 강조 표시 해제
         if (this.highlightedBone) {
@@ -150,8 +161,6 @@ export class SceneManager {
         this.scene.add(boneHelper);
         this.boneHelper = boneHelper;
         
-        // !!중요!! - 이제 메시 색상은 변경하지 않고 대신 본 자체만 강조
-        
         // 본 자체를 시각적으로 강조
         const boneViz = new THREE.AxesHelper(0.1);  // 크기 증가
         activeBone.add(boneViz);
@@ -171,133 +180,41 @@ export class SceneManager {
         console.log(`본 강조 표시 완료: ${activeBone.name}`);
     }
     
-    // 본과 연결된 메시 찾기
-    findBoneLinkedMeshes(bone) {
-        const linkedMeshes = [];
-        
-        // 1. 본의 직계 자식 중 메시만 찾기 (첫 번째 레벨만)
-        if (bone.children) {
-            bone.children.forEach(child => {
-                if ((child.isMesh || child.isSkinnedMesh)) {
-                    linkedMeshes.push(child);
-                    console.log(`본 ${bone.name}의 직접 자식 메시 발견: ${child.name}`);
-                }
-            });
-        }
-        
-        // 2. 스키닝 메시에서 이 본을 직접 사용하는 경우만 (영향도 체크)
-        if (this.currentModel) {
-            this.currentModel.traverse(obj => {
-                if (obj.isSkinnedMesh && obj.skeleton) {
-                    // 이 스키닝 메시가 이 본을 사용하는지 확인
-                    const boneIndex = obj.skeleton.bones.findIndex(b => b.uuid === bone.uuid);
-                    if (boneIndex >= 0) {
-                        // 영향도 체크 (가능하다면)
-                        if (obj.skeleton.boneInverses && obj.skeleton.boneInverses[boneIndex]) {
-                            linkedMeshes.push(obj);
-                            console.log(`본 ${bone.name}을 사용하는 스키닝 메시 발견: ${obj.name}`);
-                        }
-                    }
-                }
-            });
-        }
-        
-        // 결과 중복 제거
-        return [...new Set(linkedMeshes)];
-    }
-    
-    // 메시에 하이라이트 적용 (본과 관련된 부분만)
-    applyHighlightToMesh(mesh, bone) {
-        if (!mesh || !mesh.material) return;
-        
-        try {
-            // 원본 재질 백업
-            if (!this.originalMaterials.has(mesh.uuid)) {
-                if (Array.isArray(mesh.material)) {
-                    // 다중 재질인 경우 모든 재질 복제
-                    const originalMaterials = mesh.material.map(mat => mat.clone());
-                    this.originalMaterials.set(mesh.uuid, originalMaterials);
-                } else {
-                    this.originalMaterials.set(mesh.uuid, mesh.material.clone());
-                }
-                console.log(`원본 재질 저장: ${mesh.name}`);
-            }
-            
-            // 스키닝 메시인 경우 본의 인덱스 찾기
-            let boneIndex = -1;
-            if (mesh.isSkinnedMesh && mesh.skeleton) {
-                boneIndex = mesh.skeleton.bones.findIndex(b => b.uuid === bone.uuid);
-            }
-            
-            // 강조 색상 적용 
-            const highlightColor = new THREE.Color(0x4285f4);
-            
-            if (Array.isArray(mesh.material)) {
-                // 다중 재질 처리
-                mesh.material = mesh.material.map(mat => {
-                    if (!mat) return null;
-                    
-                    const newMat = mat.clone();
-                    newMat.emissive = highlightColor;
-                    newMat.emissiveIntensity = 0.5;
-                    
-                    // 스키닝 메시인 경우 더 뚜렷하게
-                    if (boneIndex >= 0) {
-                        newMat.emissiveIntensity = 0.7;
-                    }
-                    
-                    newMat.needsUpdate = true;
-                    return newMat;
-                });
-            } else {
-                // 단일 재질 처리
-                const newMaterial = mesh.material.clone();
-                newMaterial.emissive = highlightColor;
-                newMaterial.emissiveIntensity = 0.5;
-                
-                // 스키닝 메시인 경우 더 뚜렷하게
-                if (boneIndex >= 0) {
-                    newMaterial.emissiveIntensity = 0.7;
-                }
-                
-                newMaterial.needsUpdate = true;
-                mesh.material = newMaterial;
-            }
-            
-            console.log(`강조 색상 적용됨: ${mesh.name}`);
-        } catch (e) {
-            console.error(`재질 적용 중 오류 (${mesh.name}): ${e.message}`);
-        }
-    }
-    
     resetBoneHighlight() {
-        if (!this.highlightedBone) return;
+        if (!this.highlightedBone) {
+            console.log("강조된 본이 없어 초기화 필요 없음");
+            return;
+        }
         
-        console.log(`본 강조 해제: ${this.highlightedBone.name}`);
+        console.log(`본 강조 해제: ${this.highlightedBone.name}, UUID: ${this.highlightedBone.uuid}`);
         
         // BoxHelper 제거
         if (this.boneHelper) {
             this.scene.remove(this.boneHelper);
             this.boneHelper = null;
+            console.log("BoxHelper 제거됨");
         }
         
         // 본에 추가된 AxesHelper 제거
         if (this.boneAxisHelper && this.highlightedBone) {
             this.highlightedBone.remove(this.boneAxisHelper);
             this.boneAxisHelper = null;
+            console.log("AxesHelper 제거됨");
         }
         
         // 본에 추가된 반투명 구체 제거
         if (this.boneSphere && this.highlightedBone) {
             this.highlightedBone.remove(this.boneSphere);
             this.boneSphere = null;
+            console.log("반투명 구체 제거됨");
         }
         
-        // 원래는 메시 재질을 복원했지만, 이제 메시 색상을 변경하지 않으므로 필요 없음
-        // 혹시 있을 수 있는 메시 재질 데이터 초기화
+        // 사용했던 변수 초기화
+        const prevBoneUuid = this.highlightedBone.uuid;
+        this.highlightedBone = null;
         this.originalMaterials.clear();
         
-        this.highlightedBone = null;
+        console.log(`본 강조 초기화 완료: ${prevBoneUuid}`);
     }
     
     findObjectByUuid(object, uuid) {
@@ -313,6 +230,232 @@ export class SceneManager {
         }
         
         return null;
+    }
+    
+    // 본 위치에 선택 가능한 포인트 추가
+    addBonePoints(bones, clickCallback) {
+        // 기존 본 포인트 제거
+        this.removeBonePoints();
+        
+        // 본 포인트를 담을 그룹 생성
+        this.bonePointsGroup = new THREE.Group();
+        this.bonePointsGroup.name = 'bonePoints';
+        this.scene.add(this.bonePointsGroup);
+        
+        // 본 포인트 맵 초기화 (UUID -> 포인트 객체)
+        this.bonePoints = new Map();
+        
+        // 각 본마다 선택 가능한 포인트 생성
+        bones.forEach(bone => {
+            // 작은 구체 생성
+            const sphereGeometry = new THREE.SphereGeometry(0.03, 8, 8);
+            const sphereMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffa500,  // 주황색
+                transparent: true,
+                opacity: 0.8,
+                depthTest: true
+            });
+            const point = new THREE.Mesh(sphereGeometry, sphereMaterial);
+            
+            // 본 위치에 포인트 배치
+            point.position.copy(bone.position);
+            
+            // 포인트 데이터 설정
+            point.userData.type = 'bonePoint';
+            point.userData.boneUuid = bone.uuid;
+            point.userData.boneName = bone.name;
+            point.userData.originalColor = new THREE.Color(0xffa500);
+            
+            // 본 이름 툴팁 추가
+            point.userData.tooltip = bone.name;
+            
+            // 본 계층구조 따라 추가
+            bone.add(point);
+            
+            // 맵에 저장
+            this.bonePoints.set(bone.uuid, point);
+            
+            // 처음엔 숨김 상태로
+            point.visible = false;
+        });
+        
+        // 레이캐스터 설정
+        this.setupBonePointRaycaster(clickCallback);
+        
+        console.log(`${bones.length}개의 본 포인트 추가됨`);
+    }
+    
+    // 본 포인트 레이캐스터 설정
+    setupBonePointRaycaster(clickCallback) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.params.Points.threshold = 0.1;  // 포인트 감지 임계값
+        
+        // 이전 클릭 리스너 제거
+        if (this.pointClickListener) {
+            this.renderer.domElement.removeEventListener('click', this.pointClickListener);
+        }
+        
+        // 현재 호버된 포인트
+        let hoveredPoint = null;
+        
+        // 마우스 이동 이벤트 핸들러 (호버 효과용)
+        const mouseMoveHandler = (event) => {
+            // 본 선택 모드가 비활성화되어 있으면 무시
+            if (!this.bonePointsVisible) return;
+            
+            // 마우스 위치를 정규화된 장치 좌표로 변환
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            // 레이캐스트 업데이트
+            raycaster.setFromCamera(mouse, this.camera);
+            
+            // 본 포인트와의 교차점 확인
+            const intersects = raycaster.intersectObjects(this.scene.children, true);
+            
+            // 이전 호버 효과 제거
+            if (hoveredPoint) {
+                hoveredPoint.material.color.copy(hoveredPoint.userData.originalColor);
+                hoveredPoint.material.opacity = 0.8;
+                hoveredPoint.scale.set(1, 1, 1);
+                
+                // 커서 스타일 복원
+                this.renderer.domElement.style.cursor = 'auto';
+                
+                hoveredPoint = null;
+            }
+            
+            // 새 호버 효과 적용
+            for (let i = 0; i < intersects.length; i++) {
+                const object = intersects[i].object;
+                
+                // 본 포인트인지 확인
+                if (object.userData && object.userData.type === 'bonePoint' && object.visible) {
+                    // 호버 효과 적용
+                    object.material.color.set(0xff0000);  // 빨간색으로 변경
+                    object.material.opacity = 1.0;  // 불투명도 증가
+                    object.scale.set(1.2, 1.2, 1.2);  // 크기 증가
+                    
+                    // 커서 스타일 변경
+                    this.renderer.domElement.style.cursor = 'pointer';
+                    
+                    // 호버된 포인트 저장
+                    hoveredPoint = object;
+                    
+                    break;
+                }
+            }
+        };
+        
+        // 클릭 이벤트 핸들러
+        this.pointClickListener = (event) => {
+            // 본 선택 모드가 비활성화되어 있으면 무시
+            if (!this.bonePointsVisible) return;
+            
+            // 마우스 위치를 정규화된 장치 좌표로 변환
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            // 레이캐스트 업데이트
+            raycaster.setFromCamera(mouse, this.camera);
+            
+            // 본 포인트와의 교차점 확인
+            const intersects = raycaster.intersectObjects(this.scene.children, true);
+            
+            // 첫 번째 교차 객체 찾기
+            for (let i = 0; i < intersects.length; i++) {
+                const object = intersects[i].object;
+                
+                // 본 포인트인지 확인
+                if (object.userData && object.userData.type === 'bonePoint' && object.visible) {
+                    const boneUuid = object.userData.boneUuid;
+                    const boneName = object.userData.boneName;
+                    
+                    console.log(`본 포인트 클릭됨: ${boneName}, UUID: ${boneUuid}`);
+                    
+                    // 클릭 효과 적용
+                    object.material.color.set(0xffff00);  // 노란색 깜박임
+                    setTimeout(() => {
+                        if (object) {
+                            object.material.color.copy(object.userData.originalColor);
+                        }
+                    }, 200);
+                    
+                    // 콜백 호출
+                    if (clickCallback) {
+                        clickCallback(boneUuid);
+                    }
+                    
+                    break;
+                }
+            }
+        };
+        
+        // 이벤트 리스너 추가
+        this.renderer.domElement.addEventListener('click', this.pointClickListener);
+        this.renderer.domElement.addEventListener('mousemove', mouseMoveHandler);
+        
+        // 저장 (나중에 제거하기 위함)
+        this.mouseMoveHandler = mouseMoveHandler;
+    }
+    
+    // 본 점 표시/숨김 토글
+    toggleBonePoints(visible) {
+        this.bonePointsVisible = visible;
+        
+        if (this.bonePoints) {
+            this.bonePoints.forEach(point => {
+                point.visible = visible;
+            });
+        }
+        
+        // 본 선택 모드가 비활성화되면 모델 클릭 모드로 돌아감
+        if (!visible) {
+            // 커서 스타일 복원
+            if (this.renderer && this.renderer.domElement) {
+                this.renderer.domElement.style.cursor = 'auto';
+            }
+        }
+        
+        console.log(`본 포인트 ${visible ? '표시' : '숨김'}`);
+    }
+    
+    // 본 포인트 제거
+    removeBonePoints() {
+        if (this.bonePointsGroup) {
+            this.scene.remove(this.bonePointsGroup);
+            this.bonePointsGroup = null;
+        }
+        
+        // 각 본에 추가된 포인트 제거
+        if (this.bonePoints) {
+            this.bonePoints.forEach((point, boneUuid) => {
+                if (point.parent) {
+                    point.parent.remove(point);
+                }
+            });
+            this.bonePoints.clear();
+        }
+        
+        // 이벤트 리스너 제거
+        if (this.renderer) {
+            if (this.pointClickListener) {
+                this.renderer.domElement.removeEventListener('click', this.pointClickListener);
+                this.pointClickListener = null;
+            }
+            
+            if (this.mouseMoveHandler) {
+                this.renderer.domElement.removeEventListener('mousemove', this.mouseMoveHandler);
+                this.mouseMoveHandler = null;
+            }
+        }
+        
+        // 본 포인트 가시성 상태 초기화
+        this.bonePointsVisible = false;
     }
     
     update() {

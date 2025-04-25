@@ -48,6 +48,62 @@ window.addEventListener('DOMContentLoaded', function() {
         
         // 모델의 본에 클릭 이벤트 추가
         setupBoneClickEvents(bones);
+        
+        // 본 포인트 추가 (처음에는 숨김 상태로)
+        sceneManager.addBonePoints(bones, highlightBone);
+        sceneManager.toggleBonePoints(false);
+        
+        // 본 포인트 토글 UI 추가
+        addBonePointsToggle();
+    }
+    
+    // 본 포인트 토글 버튼 추가
+    function addBonePointsToggle() {
+        // 이미 있는 경우 제거
+        const existingToggle = document.getElementById('bonepoints-toggle');
+        if (existingToggle) {
+            existingToggle.parentElement.removeChild(existingToggle);
+        }
+        
+        // 토글 컨테이너 생성
+        const toggleContainer = document.createElement('div');
+        toggleContainer.id = 'bonepoints-toggle';
+        toggleContainer.className = 'bone-select-toggle';
+        
+        // 체크박스 생성
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = 'bonepoints-checkbox';
+        
+        // 레이블 생성
+        const label = document.createElement('label');
+        label.htmlFor = 'bonepoints-checkbox';
+        label.textContent = '본 선택 모드';
+        
+        // 초기 상태 설정 (기본값: 비활성화)
+        checkbox.checked = false;
+        sceneManager.toggleBonePoints(false);
+        
+        // 체크박스 이벤트 리스너 추가
+        checkbox.addEventListener('change', () => {
+            const isEnabled = checkbox.checked;
+            sceneManager.toggleBonePoints(isEnabled);
+            console.log(`본 선택 모드: ${isEnabled ? '활성화' : '비활성화'}`);
+            
+            // 시각적 피드백
+            if (isEnabled) {
+                toggleContainer.classList.add('active');
+            } else {
+                toggleContainer.classList.remove('active');
+            }
+        });
+        
+        // 요소 조립
+        toggleContainer.appendChild(checkbox);
+        toggleContainer.appendChild(label);
+        
+        // 문서에 추가
+        document.body.appendChild(toggleContainer);
     }
     
     // 스킨 메시와 본 간의 관계 설정
@@ -120,25 +176,11 @@ window.addEventListener('DOMContentLoaded', function() {
         
         console.log(`설정할 본 개수: ${bones.length}`);
         
-        // 디버깅용 - 모든 본 UUID 목록 출력
+        // 디버깅을 위해 모든 본 출력
         console.log("모든 본 UUID 목록:");
         bones.forEach(bone => {
             console.log(`${bone.name}: ${bone.uuid}`);
         });
-        
-        // 직계 부모 본 체크
-        function findParentBone(object) {
-            if (!object) return null;
-            let current = object;
-            while (current && current !== model) {
-                const parent = current.parent;
-                if (parent && bones.includes(parent)) {
-                    return parent;
-                }
-                current = parent;
-            }
-            return null;
-        }
         
         // 클릭 이벤트 핸들러
         function handleModelClick(event) {
@@ -164,7 +206,7 @@ window.addEventListener('DOMContentLoaded', function() {
             if (intersects.length > 0) {
                 const clickedObject = intersects[0].object;
                 const clickPoint = intersects[0].point;
-                console.log(`클릭된 객체: ${clickedObject.name}, UUID: ${clickedObject.uuid}`);
+                console.log(`클릭된 객체: ${clickedObject.name || "unnamed"}, UUID: ${clickedObject.uuid}`);
                 
                 // 1. 클릭된 객체의 부모 체인을 탐색하여 본 찾기
                 let selectedBone = null;
@@ -204,100 +246,25 @@ window.addEventListener('DOMContentLoaded', function() {
                 if (selectedBone) {
                     console.log(`선택된 본: ${selectedBone.name}, UUID: ${selectedBone.uuid}`);
                     console.log(`강조할 UUID: ${selectedBone.uuid}`);
-                    highlightBone(selectedBone.uuid);
+                    
+                    // 이전 선택과 같은 본인지 확인
+                    const currentBone = sceneManager.getHighlightedBone();
+                    if (currentBone && currentBone.uuid === selectedBone.uuid) {
+                        //console.log("이미 선택된 본과 동일함: 선택 유지");
+                    } else {
+                        console.log("새로운 본 선택됨: 강조 변경");
+                        highlightBone(selectedBone.uuid);
+                    }
                     return;
                 }
                 
                 // 3. 본을 찾지 못했으면 가장 가까운 본 찾기
                 const closestBone = findClosestVisibleBone(clickPoint, bones, camera);
                 if (closestBone) {
-                    console.log(`가장 가까운 본 선택: ${closestBone.name}, UUID: ${closestBone.uuid}`);
+                    console.log(`가장 가까운 본 선택: ${closestBone.name}`);
                     highlightBone(closestBone.uuid);
                 }
             }
-        }
-        
-        // 스키닝 메시에서 특정 지점에 가장 영향을 많이 주는 본 찾기
-        function findInfluentialBoneAtPoint(skinnedMesh, point, intersection) {
-            if (!skinnedMesh.skeleton || !skinnedMesh.skeleton.bones || skinnedMesh.skeleton.bones.length === 0) {
-                return null;
-            }
-            
-            // 교차 정보에서 면 인덱스 가져오기
-            const faceIndex = intersection.faceIndex;
-            if (faceIndex === undefined) return null;
-            
-            // 해당 면의 정점 인덱스 가져오기
-            const geometry = skinnedMesh.geometry;
-            if (!geometry || !geometry.index) return null;
-            
-            const a = geometry.index.getX(faceIndex * 3);
-            const b = geometry.index.getX(faceIndex * 3 + 1);
-            const c = geometry.index.getX(faceIndex * 3 + 2);
-            
-            console.log(`면 정점 인덱스: ${a}, ${b}, ${c}`);
-            
-            // 스키닝 정보 가져오기
-            const skinIndices = geometry.getAttribute('skinIndex');
-            const skinWeights = geometry.getAttribute('skinWeight');
-            
-            if (!skinIndices || !skinWeights) {
-                console.log('스키닝 정보 없음');
-                return null;
-            }
-            
-            // 가장 영향력 있는 본 찾기
-            const boneInfluences = new Map(); // 본 인덱스 -> 영향력 합계
-            
-            // 각 정점의 스키닝 정보 처리
-            [a, b, c].forEach(vertexIndex => {
-                // 각 정점에 영향을 주는 본 인덱스와 가중치 가져오기
-                const idx = skinIndices.getX(vertexIndex);
-                const weight = skinWeights.getX(vertexIndex);
-                
-                // 가중치가 0보다 크면 영향력 합산
-                if (weight > 0) {
-                    const currentInfluence = boneInfluences.get(idx) || 0;
-                    boneInfluences.set(idx, currentInfluence + weight);
-                }
-                
-                // 두 번째, 세 번째, 네 번째 영향도 체크
-                for (let i = 1; i < 4; i++) {
-                    const getMethod = i === 1 ? 'getY' : i === 2 ? 'getZ' : 'getW';
-                    if (skinIndices[getMethod] && skinWeights[getMethod]) {
-                        const idxN = skinIndices[getMethod](vertexIndex);
-                        const weightN = skinWeights[getMethod](vertexIndex);
-                        
-                        if (weightN > 0) {
-                            const currentInfluence = boneInfluences.get(idxN) || 0;
-                            boneInfluences.set(idxN, currentInfluence + weightN);
-                        }
-                    }
-                }
-            });
-            
-            // 영향력이 가장 큰 본 찾기
-            let maxInfluence = 0;
-            let mostInfluentialBoneIndex = -1;
-            
-            boneInfluences.forEach((influence, boneIndex) => {
-                console.log(`본 인덱스 ${boneIndex}: 영향력 ${influence}`);
-                if (influence > maxInfluence) {
-                    maxInfluence = influence;
-                    mostInfluentialBoneIndex = boneIndex;
-                }
-            });
-            
-            // 본 인덱스로 본 객체 찾기
-            if (mostInfluentialBoneIndex >= 0 && mostInfluentialBoneIndex < skinnedMesh.skeleton.bones.length) {
-                const bone = skinnedMesh.skeleton.bones[mostInfluentialBoneIndex];
-                console.log(`가장 영향력 있는 본: ${bone.name}, 인덱스: ${mostInfluentialBoneIndex}, 영향력: ${maxInfluence}`);
-                return bone.uuid;
-            }
-            
-            // 본을 찾지 못한 경우 첫 번째 본 반환
-            console.log('영향력 있는 본을 찾지 못함, 첫 번째 본 반환');
-            return skinnedMesh.skeleton.bones[0].uuid;
         }
         
         // 가시성을 고려하여 가장 가까운 본 찾기
@@ -349,7 +316,14 @@ window.addEventListener('DOMContentLoaded', function() {
     
     // 본 강조 표시
     function highlightBone(boneUuid) {
-        console.log(`본 강조 함수 호출됨: UUID=${boneUuid}`);
+        //console.log(`본 강조 함수 호출됨: UUID=${boneUuid}`);
+        
+        // 현재 강조된 본 확인
+        const currentBone = sceneManager.getHighlightedBone();
+        if (currentBone && currentBone.uuid === boneUuid) {
+            //console.log(`이미 강조된 본(${currentBone.name})과 동일함: 작업 중단`);
+            return;
+        }
         
         // 본 UUID가 유효한지 확인
         const bone = boneController.getBones().find(b => b.uuid === boneUuid);
@@ -357,6 +331,8 @@ window.addEventListener('DOMContentLoaded', function() {
             console.error(`유효하지 않은 본 UUID: ${boneUuid}`);
             return;
         }
+        
+        console.log(`새로운 본 강조: ${bone.name}`);
         
         // UI에서 슬라이더 강조
         uiManager.highlightBoneSlider(boneUuid);
